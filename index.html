@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>御見積書作成 - プロス株式会社 EMS</title>
+<style>
+  :root{
+    --line:#000; --hl:#ffff00; --head:#f0f0f0; --stamp:#e60012;
+    --tool:#1f4e79; --tool-light:#eaf1f8;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Yu Gothic","Hiragino Kaku Gothic ProN","Meiryo",sans-serif; margin:0; background:#eef1f5; color:#000;}
+
+  /* ログインゲート（未ログイン時に全面表示） */
+  #loginGate{position:fixed; inset:0; z-index:100; background:#fff; display:flex;
+    flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center; padding:20px;}
+  #loginGate img{height:48px;}
+  #loginGate h2{font-size:18px; margin:0; color:#1f4e79;}
+  #loginGate p{font-size:13px; color:#555; margin:0;}
+  #loginGate button{background:#1f4e79; color:#fff; border:none; border-radius:6px;
+    padding:12px 28px; font-size:15px; font-weight:bold; cursor:pointer;}
+  #loginGate button:hover{background:#163a5c;}
+  #loginGate .err{font-size:12px; color:#b23; min-height:1em;}
+
+  /* 操作バー */
+  .toolbar{position:sticky; top:0; z-index:20; background:var(--tool); color:#fff;
+    padding:10px 18px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; box-shadow:0 2px 6px rgba(0,0,0,.15);}
+  .toolbar h1{font-size:15px; margin:0; margin-right:auto;}
+  .toolbar label{font-size:12px;}
+  .toolbar select,.toolbar input{padding:6px 8px; border-radius:5px; border:none; font-size:13px; color:#163a5c;}
+  .toolbar button{background:#fff; color:var(--tool); border:none; border-radius:5px; padding:7px 14px; font-size:13px; font-weight:bold; cursor:pointer;}
+  .toolbar button:hover{background:var(--tool-light);}
+  .toolbar .ghost{background:transparent; color:#fff; border:1px solid #fff;}
+  .toolbar .save-sp{background:#ffd400; color:#5a4b00;}
+  .hint{font-size:11px; color:#cdd9e8; width:100%; margin-top:2px;}
+  #authStatus{font-size:12px; color:#cdeaff;}
+
+  /* 用紙 */
+  .page{background:#fff; max-width:780px; margin:20px auto; padding:30px 36px 40px; box-shadow:0 2px 12px rgba(0,0,0,.1); font-size:12px;}
+  .title{text-align:center; font-size:26px; font-weight:bold; letter-spacing:.3em; text-decoration:underline; text-underline-offset:6px; margin:0 0 14px;}
+
+  .top{display:flex; justify-content:space-between; gap:20px;}
+  .client{flex:1.1;}
+  .crow{display:flex; align-items:flex-end; margin-bottom:7px;}
+  .crow .lbl{width:78px; color:#000; font-size:12px; flex:none;}
+  .crow .val{width:250px; flex:none; border-bottom:1px solid #333; min-height:18px; padding:0 4px 2px;}
+  .crow .suffix{margin-left:6px; font-size:12px;}
+  .right{flex:1; font-size:12px;}
+  .meta{display:grid; grid-template-columns:auto 1fr; gap:7px 8px; margin-bottom:7px; justify-items:end; align-items:end;}
+  .meta .m-lbl{color:#000;}
+  .meta .m-val{border-bottom:1px solid #999; width:185px; min-height:18px; text-align:left; padding:0 4px 2px;}
+  .logo-img{height:30px; display:block; margin:29px 0 6px;}
+  .seller{font-size:11px; line-height:1.7;}
+  .seller .sline{border-bottom:1px solid #333; padding-bottom:2px; margin-bottom:4px;}
+  .seller #sellerAddr{font-size:9.5px; white-space:nowrap;}
+
+  .tantou-wrap{display:flex; align-items:center; justify-content:flex-end; gap:14px; margin:14px 0; position:relative;}
+  .tantou{font-size:12px; font-weight:bold;}
+  .stamp{width:78px; height:78px; border:2.5px solid var(--stamp); border-radius:50%;
+    color:var(--stamp); display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-weight:bold; line-height:1.25; flex:none;}
+  .stamp .s1{font-size:9px;} .stamp .s2{font-size:11px;} .stamp .s3{font-size:13px;}
+
+  .grand{display:flex; align-items:center; gap:16px; margin:0 0 40px;}
+  .grand .g-lbl{font-size:14px; font-weight:bold;}
+  .grand .g-sub{font-size:11px;}
+  .grand .g-val{flex:1; border:1px solid #333; font-size:22px; font-weight:bold; text-align:center; padding:6px 0;}
+
+  .koji{display:flex; align-items:stretch; margin-bottom:10px; border:1px solid var(--line);}
+  .koji .k-lbl{background:#ffff00; font-weight:bold; padding:6px 12px; border-right:1px solid var(--line); white-space:nowrap;}
+  .koji .k-val{flex:1; background:#ffff00; font-weight:bold; padding:6px 12px;}
+
+  table{width:100%; border-collapse:collapse;}
+  th,td{border:1px solid var(--line); padding:5px 7px; font-size:12px;}
+  thead th{background:#f0f0f0; text-align:center; font-weight:bold;}
+  td.num{text-align:right;} td.center{text-align:center;}
+  input.cell{border:none; width:100%; font-size:12px; font-family:inherit; background:transparent;}
+  input.cell.num{text-align:right;} input.cell.center{text-align:center;}
+  [contenteditable]{outline:none; min-height:1em;}
+  [contenteditable]:focus,input.cell:focus{background:#fffbcf;}
+  td.amount{text-align:right; background:#fafafa;}
+  .row-del{background:#b23; color:#fff; border:none; border-radius:3px; width:20px; height:20px; cursor:pointer; line-height:1;}
+  tr.kanri td, tr.total td{background:#ffff00; font-weight:bold;}
+  tr.total td{font-size:14px;}
+
+  .addbar{margin:8px 0; display:flex; gap:8px; flex-wrap:wrap;}
+  .addbar button{background:var(--tool-light); color:var(--tool); border:1px dashed var(--tool); border-radius:5px; padding:6px 12px; font-size:12px; cursor:pointer;}
+
+  .remarks{margin-top:16px; border:1px solid var(--line);}
+  .remarks .r-head{background:#f0f0f0; font-weight:bold; padding:4px 8px; border-bottom:1px solid var(--line);}
+  .remarks .r-body{padding:8px; min-height:80px; white-space:pre-wrap; font-size:12px;}
+
+  .master{position:sticky; top:0; z-index:15; background:#fff; border:2px solid var(--tool); border-radius:8px;
+    max-width:780px; margin:10px auto; padding:14px 18px; display:none;}
+  .master h2{font-size:14px; margin:0 0 8px; color:var(--tool);}
+  .master table{font-size:12px;}
+  .master th{background:var(--tool); color:#fff; padding:5px;}
+  .master .ins{background:var(--tool); color:#fff; border:none; border-radius:4px; padding:3px 10px; cursor:pointer; font-size:11px;}
+  .master .mdel{background:#b23; color:#fff; border:none; border-radius:3px; width:20px; height:20px; cursor:pointer;}
+  .master .note{font-size:11px; color:#666; margin-top:8px;}
+
+  @media print{
+    body{background:#fff;}
+    .toolbar,.master,.addbar,.row-del,.no-print{display:none !important;}
+    .page{box-shadow:none; margin:0; max-width:none; padding:8mm;}
+    [contenteditable]:focus,input.cell:focus{background:transparent;}
+    @page{size:A4; margin:10mm;}
+  }
+</style>
+</head>
+<body>
+
+<div id="loginGate">
+  <img src="logo.svg" alt="プロス株式会社">
+  <h2>御見積書作成システム（EMS）</h2>
+  <p>ご利用にはプロスのアカウントでのサインインが必要です。</p>
+  <button onclick="signIn()">Microsoft アカウントでサインイン</button>
+  <div class="err" id="loginErr"></div>
+  <div id="rUri" style="font-size:10px;color:#bbb;margin-top:24px"></div>
+</div>
+
+<div class="toolbar no-print">
+  <h1>御見積書作成（EMS）</h1>
+  <span id="authStatus">未ログイン</span>
+  <button id="loginBtn" onclick="signIn()">ログイン</button>
+  <label>事業所：<select id="officeSel" onchange="applyOffice()"></select></label>
+  <label>担当：<select id="tantouSel" onchange="applyTantou()"></select></label>
+  <button onclick="addRow()">＋行</button>
+  <button onclick="toggleMaster()">単価マスタ</button>
+  <button onclick="window.print()">PDF/印刷</button>
+  <button class="save-sp" onclick="saveToSharePoint()">SharePointに保存</button>
+  <button class="ghost" onclick="resetAll()">新規</button>
+  <button class="ghost" onclick="listFolders()" title="保存先フォルダ名の確認用">📁確認</button>
+  <div class="hint">ログイン後「SharePointに保存」で、見積フォルダへ保存＋台帳へ自動記入（作成者・時刻つき）。下線・黄枠はクリックで直接編集可。</div>
+</div>
+
+<div class="master no-print" id="masterPanel">
+  <h2>単価マスタ（標準単価を全事業所で統一）</h2>
+  <table>
+    <thead><tr><th style="width:50%">品名・仕様</th><th style="width:90px">標準単価</th><th style="width:70px">単位</th><th style="width:70px">挿入</th><th style="width:30px"></th></tr></thead>
+    <tbody id="masterBody"></tbody>
+  </table>
+  <div class="addbar"><button onclick="addMasterRow()">＋ マスタ項目を追加</button><button onclick="saveMaster()">マスタを保存</button></div>
+  <div class="note">※標準単価を登録し、行の「挿入」で見積に呼び出せます。事業所ごとの単価バラつき防止用。値はこのブラウザに保存されます。</div>
+</div>
+
+<div class="page" id="page">
+  <div class="title">御見積書</div>
+  <div class="top">
+    <div class="client">
+      <div class="crow"><span class="lbl">会社名</span><span class="val" id="cCompany" contenteditable="true"></span></div>
+      <div class="crow"><span class="lbl">部署名</span><span class="val" id="cDept" contenteditable="true"></span></div>
+      <div class="crow"><span class="lbl">御担当者名</span><span class="val" id="cPerson" contenteditable="true"></span><span class="suffix">様</span></div>
+      <div class="crow"><span class="lbl">納入期限</span><span class="val" contenteditable="true">別途打ち合わせ</span></div>
+      <div class="crow"><span class="lbl">納入場所</span><span class="val" contenteditable="true">別途打ち合わせ</span></div>
+    </div>
+    <div class="right">
+      <div class="meta">
+        <span class="m-lbl">見積もりNo,</span><span class="m-val" id="estNo" contenteditable="true"></span>
+        <span class="m-lbl">御見積発効日</span><span class="m-val" id="issueDate" contenteditable="true" oninput="updateStamp()"></span>
+        <span class="m-lbl">有効期限</span><span class="m-val" contenteditable="true">発行日より1か月以内</span>
+      </div>
+      <img class="logo-img" src="logo.svg" alt="プロス株式会社">
+      <div class="seller">
+        <div class="sline" id="sellerAddr"></div>
+        <div class="sline" id="sellerTel"></div>
+      </div>
+      <div class="tantou-wrap">
+        <span class="tantou">担当　<span id="tantouName"></span></span>
+        <div class="stamp"><span class="s1">PROS</span><span class="s2" id="stampDate"></span><span class="s3" id="stampName"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grand">
+    <span class="g-lbl">御見積金額</span><span class="g-sub">（消費税抜き）</span>
+    <span class="g-val">¥<span id="grandTotal">0</span></span>
+  </div>
+
+  <div class="koji"><span class="k-lbl">工事名</span><span class="k-val" id="kojiName" contenteditable="true"></span></div>
+
+  <table id="itemsTable">
+    <thead><tr>
+      <th style="width:34px">No.</th><th>品名・仕様</th><th style="width:52px">数量</th>
+      <th style="width:48px">単位</th><th style="width:100px">単価</th><th style="width:110px">金額</th>
+      <th class="no-print" style="width:26px"></th>
+    </tr></thead>
+    <tbody id="itemsBody"></tbody>
+    <tfoot id="itemsFoot"></tfoot>
+  </table>
+
+  <div class="addbar no-print">
+    <button onclick="addRow()">＋ 明細行を追加</button>
+    <label style="font-size:12px; color:#333;"><input type="checkbox" id="kanriChk" onchange="calc()"> 管理費（<span contenteditable="true" id="kanriRate" oninput="calc()">5</span>%）を自動算出</label>
+  </div>
+
+  <div class="remarks">
+    <div class="r-head">備考：お見積り条件</div>
+    <div class="r-body" contenteditable="true">１．本見積書には消費税（10％）は含まれておりません。
+２．納期 及び お支払条件　別途打ち合わせ</div>
+  </div>
+</div>
+
+<!-- MSAL (Microsoft 認証) -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"></script>
+<script>
+  /* ===================== 設定（要確認の箇所あり） ===================== */
+  const CONFIG = {
+    clientId: "665c09da-9aab-4ea3-8391-f0654d64113d",
+    tenantId: "325204d3-2d66-4bcd-9a16-aea61e12fd74",
+    // ▼ いただいた共有リンクで保存先フォルダを直接特定（フォルダ名不要）
+    shareSaveUrl:   "https://pros123.sharepoint.com/:f:/s/ems/IgBTxsk9cHw_SYZFywmsJTY0Aa0ZIxrSmdndYa3BcwgbLFU",
+    shareLedgerUrl: "https://pros123.sharepoint.com/:f:/s/ems/IgAJF6U3-TMBRZFwpCIF8IdeAQWyN_sxaNUs5-G2T5yj3L4",
+    ledgerFile:   "見積台帳.xlsx",
+    tableName:    "見積台帳"
+  };
+  const SCOPES = ["User.Read","Files.ReadWrite.All","Sites.ReadWrite.All"];
+
+  /* ===================== MSAL ===================== */
+  const msalApp = new msal.PublicClientApplication({
+    auth: {
+      clientId: CONFIG.clientId,
+      authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+      redirectUri: window.location.origin + window.location.pathname
+    },
+    cache: { cacheLocation: "localStorage" }
+  });
+  let account = null;
+
+  async function initAuth(){
+    await msalApp.initialize();
+    const accts = msalApp.getAllAccounts();
+    if(accts.length){ account = accts[0]; showAuth(); refreshEstNo(); }
+  }
+  function showAuth(){
+    document.getElementById('authStatus').textContent = account ? `${account.name} でログイン中` : "未ログイン";
+    document.getElementById('loginBtn').textContent = account ? "ログアウト" : "ログイン";
+    document.getElementById('loginBtn').onclick = account ? signOut : signIn;
+    // ログインゲートの表示制御（未ログインなら全面表示）
+    document.getElementById('loginGate').style.display = account ? 'none' : 'flex';
+  }
+  async function signIn(){
+    try{
+      const r = await msalApp.loginPopup({ scopes: SCOPES });
+      account = r.account; showAuth(); refreshEstNo();
+    }catch(e){ document.getElementById('loginErr').textContent = "ログインに失敗しました：" + e.message; }
+  }
+  function signOut(){ msalApp.logoutPopup(); account=null; showAuth(); }
+
+  async function getToken(){
+    if(!account) await signIn();
+    if(!account) throw new Error("未ログイン");
+    try{
+      const r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account });
+      return r.accessToken;
+    }catch(e){
+      const r = await msalApp.acquireTokenPopup({ scopes: SCOPES });
+      account = r.account; showAuth(); return r.accessToken;
+    }
+  }
+  async function graph(path, opts={}){
+    const token = await getToken();
+    const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
+      ...opts,
+      headers: { "Authorization": "Bearer " + token, ...(opts.headers||{}) }
+    });
+    if(!res.ok){ const t = await res.text(); throw new Error(`Graph ${res.status}: ${t}`); }
+    const ct = res.headers.get("content-type")||"";
+    return ct.includes("json") ? res.json() : res.text();
+  }
+
+  /* 共有リンク → driveItem 解決 */
+  function shareToken(url){
+    const base = url.split('?')[0];
+    let b64 = btoa(unescape(encodeURIComponent(base)));
+    return "u!" + b64.replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
+  }
+  const _shareCache = {};
+  async function resolveShare(url){
+    if(_shareCache[url]) return _shareCache[url];
+    const item = await graph(`/shares/${shareToken(url)}/driveItem?$select=id,name,parentReference,folder,webUrl`);
+    const r = { driveId: item.parentReference && item.parentReference.driveId, itemId: item.id, name: item.name };
+    _shareCache[url] = r; return r;
+  }
+
+  /* 保存先フォルダ・台帳の確認用 */
+  async function listFolders(){
+    try{
+      const save = await resolveShare(CONFIG.shareSaveUrl);
+      const led  = await resolveShare(CONFIG.shareLedgerUrl);
+      // 台帳フォルダ内の見積台帳.xlsxの有無
+      let hasLedger = "（見つかりません。台帳フォルダに見積台帳.xlsxをアップしてください）";
+      try{
+        const ch = await graph(`/drives/${led.driveId}/items/${led.itemId}/children?$select=name`);
+        hasLedger = ch.value.some(x=>x.name===CONFIG.ledgerFile) ? "✓ あり" : hasLedger;
+      }catch(_){}
+      alert(`保存先フォルダ：${save.name}\n台帳フォルダ：${led.name}\n台帳ファイル(${CONFIG.ledgerFile})：${hasLedger}\n\nこの2フォルダで合っていれば保存テストできます。`);
+    }catch(e){ alert("確認失敗：" + e.message + "\n（ログイン・API許可をご確認ください）"); }
+  }
+
+  /* ===================== SharePoint 保存 ===================== */
+  function sanitize(s){ return (s||"").replace(/[\\\/:*?"<>|]/g,"_").trim().slice(0,80); }
+
+  async function saveToSharePoint(){
+    try{
+      if(!account){ await signIn(); if(!account) return; }
+      const saveDir = await resolveShare(CONFIG.shareSaveUrl);
+      const ledDir  = await resolveShare(CONFIG.shareLedgerUrl);
+
+      // 台帳を見て当日の次番号を採番（使用済みは飛ばす）
+      const ledFile = await getLedgerFile(ledDir);
+      const estNo = await nextEstNo(ledDir, ledFile);
+      document.getElementById('estNo').textContent = estNo;
+      const issue  = txt('issueDate');
+      const client = txt('cCompany');
+      const dept   = txt('cDept');
+      const person = txt('cPerson');
+      const koji   = txt('kojiName');
+      const total  = document.getElementById('grandTotal').textContent;
+      const tantou = document.getElementById('tantouSel').value;
+      const office = document.getElementById('officeSel').value;
+      const author = account.name || account.username;
+      const now    = new Date();
+      const stamp  = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${('0'+now.getHours()).slice(-2)}:${('0'+now.getMinutes()).slice(-2)}`;
+
+      const base = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
+
+      // ① 元データ(JSON) を保存
+      const json = JSON.stringify({
+        estNo, issue, client, dept, person, koji, total, tantou, office, author, savedAt: stamp,
+        pageHtml: document.getElementById('page').innerHTML
+      }, null, 2);
+      await graph(
+        `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent(base)}.json:/content`,
+        { method:"PUT", headers:{ "Content-Type":"application/json" }, body: json }
+      );
+
+      // ② PDF を保存（見た目そのまま）
+      const pdfBlob = await makePdfBlob();
+      await graph(
+        `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent(base)}.pdf:/content`,
+        { method:"PUT", headers:{ "Content-Type":"application/pdf" }, body: pdfBlob }
+      );
+
+      // ③ 台帳Excelに1行追加（採番で特定済みのledFileを再利用）
+      await graph(
+        `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`,
+        { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, Number(total.replace(/,/g,''))||0, tantou, office, author, stamp, base+".pdf" ]] }) }
+      );
+
+      alert(`保存しました。\n・見積フォルダ：${base}.pdf（＋再編集用 .json）\n・台帳に1行追記（作成者：${author}／${stamp}）`);
+    }catch(e){
+      alert("保存に失敗しました：\n" + e.message);
+      console.error(e);
+    }
+  }
+  function txt(id){ return (document.getElementById(id).textContent||"").trim(); }
+
+  /* 見積をPDF化（入力値を文字に展開した複製から生成） */
+  async function makePdfBlob(){
+    const clone = document.getElementById('page').cloneNode(true);
+    clone.querySelectorAll('input').forEach(inp=>{
+      const sp=document.createElement('span'); sp.textContent=inp.value; sp.className=inp.className; inp.replaceWith(sp);
+    });
+    clone.querySelectorAll('.no-print').forEach(e=>e.remove());
+    // PDF生成ライブラリがCSS変数の背景を拾えないため、色を直接指定
+    clone.querySelectorAll('.k-lbl, .k-val').forEach(e=>e.style.backgroundColor='#ffff00');
+    clone.querySelectorAll('tr.kanri td, tr.total td').forEach(e=>e.style.backgroundColor='#ffff00');
+    clone.querySelectorAll('thead th').forEach(e=>e.style.backgroundColor='#f0f0f0');
+    clone.querySelectorAll('td.amount').forEach(e=>e.style.backgroundColor='#fafafa');
+    clone.querySelectorAll('.r-head').forEach(e=>e.style.backgroundColor='#f0f0f0');
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:fixed;left:-9999px;top:0;background:#fff;';
+    wrap.appendChild(clone); document.body.appendChild(wrap);
+    const opt={ margin:[8,8,8,8], image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2, useCORS:true, backgroundColor:'#ffffff'},
+      jsPDF:{unit:'mm', format:'a4', orientation:'portrait'} };
+    try{ return await html2pdf().set(opt).from(clone).outputPdf('blob'); }
+    finally{ document.body.removeChild(wrap); }
+  }
+
+  /* ===== 見積番号 自動連番 ===== */
+  function currentYmd(){
+    const raw=txt('issueDate'); const m=raw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    const d = m ? new Date(+m[1],+m[2]-1,+m[3]) : new Date();
+    const p=n=>('0'+n).slice(-2);
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`;
+  }
+  async function getLedgerFile(ledDir){
+    const ch = await graph(`/drives/${ledDir.driveId}/items/${ledDir.itemId}/children?$select=id,name`);
+    const f = ch.value.find(x=>x.name===CONFIG.ledgerFile);
+    if(!f) throw new Error(`台帳ファイル「${CONFIG.ledgerFile}」が台帳フォルダにありません。アップロードしてください。`);
+    return f;
+  }
+  async function nextEstNo(ledDir, ledFile){
+    const ymd = currentYmd();
+    let used=[];
+    try{
+      const rows = await graph(`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`);
+      used = rows.value.map(r=> (r.values && r.values[0] && r.values[0][0]!=null) ? String(r.values[0][0]).trim() : '').filter(Boolean);
+    }catch(_){}
+    let max=0; const re=new RegExp('^'+ymd+'-(\\d+)$');
+    used.forEach(no=>{ const m=no.match(re); if(m) max=Math.max(max, parseInt(m[1],10)); });
+    return `${ymd}-${('00'+(max+1)).slice(-3)}`;
+  }
+  /* ログイン時／読込時に当日の次番号を表示 */
+  async function refreshEstNo(){
+    try{
+      if(!account) return;
+      const ledDir = await resolveShare(CONFIG.shareLedgerUrl);
+      const ledFile = await getLedgerFile(ledDir);
+      document.getElementById('estNo').textContent = await nextEstNo(ledDir, ledFile);
+    }catch(e){ console.warn('estNo refresh:', e.message); }
+  }
+
+  /* ===================== マスタ定義 ===================== */
+  const OFFICES={
+    "鶴間事業所":{addr:"〒242-0001　神奈川県大和市下鶴間2776-6　藤川伝導機㈱内", tel:"TEL 046-240-1255　FAX 046-240-1285"},
+    "大和事業所":{addr:"〒242-0029　神奈川県大和市上草柳6-18-5", tel:"TEL 046-240-1850　FAX 046-240-1851"},
+    "綾瀬事業所":{addr:"〒252-1121　神奈川県綾瀬市小園1078-1", tel:"TEL 046-740-5071　FAX 046-740-5072"},
+    "長野設計オフィス":{addr:"〒399-4117　長野県駒ヶ根市赤穂1298-2　サンポー本社ビル2F C号室", tel:"TEL 0120-084-087　FAX 0265-98-8475"}
+  };
+  const TANTOU={ "佐藤 晃弘":"佐藤", "権田 直樹":"権田" };
+  const DEFAULT_MASTER=[
+    {name:"設計費（機械関連）", price:330000, unit:"式"},
+    {name:"設計費（電気関連）", price:70000,  unit:"式"},
+    {name:"製造費（機械関連：組立＆位置出し＆流動確認）", price:0, unit:"式"},
+    {name:"製造費（電気関連：配線＆デバッグ）", price:0, unit:"式"}
+  ];
+
+  function initSelects(){
+    const o=document.getElementById('officeSel');
+    Object.keys(OFFICES).forEach(k=>{o.innerHTML+=`<option>${k}</option>`;});
+    const t=document.getElementById('tantouSel');
+    Object.keys(TANTOU).forEach(k=>{t.innerHTML+=`<option>${k}</option>`;});
+  }
+  function applyOffice(){
+    const k=document.getElementById('officeSel').value, o=OFFICES[k];
+    document.getElementById('sellerAddr').textContent=o.addr;
+    document.getElementById('sellerTel').textContent=o.tel;
+  }
+  function applyTantou(){
+    const full=document.getElementById('tantouSel').value;
+    document.getElementById('tantouName').textContent=full;
+    document.getElementById('stampName').textContent=TANTOU[full];
+  }
+  function updateStamp(){
+    const raw=document.getElementById('issueDate').textContent.trim();
+    const m=raw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+    document.getElementById('stampDate').textContent = m ? `${m[1]}/${+m[2]}/${+m[3]}` : raw;
+  }
+
+  function addRow(name="", qty="", unit="式", price=""){
+    const tr=document.createElement('tr'); tr.className='item';
+    tr.innerHTML=`
+      <td class="center idx"></td>
+      <td contenteditable="true">${name}</td>
+      <td><input class="cell center qty" value="${qty}" oninput="calc()"></td>
+      <td class="center" contenteditable="true">${unit}</td>
+      <td><input class="cell num price" value="${price}" oninput="calc()"></td>
+      <td class="amount">¥0</td>
+      <td class="no-print center"><button class="row-del" onclick="this.closest('tr').remove();calc()">×</button></td>`;
+    document.getElementById('itemsBody').appendChild(tr); calc();
+  }
+  function num(v){return parseFloat(String(v).replace(/[^\d.\-]/g,''))||0;}
+  function yen(n){return Math.round(n).toLocaleString('ja-JP');}
+  function calc(){
+    let subtotal=0;
+    document.querySelectorAll('#itemsBody tr.item').forEach((tr,i)=>{
+      tr.querySelector('.idx').textContent=i+1;
+      const q=num(tr.querySelector('.qty').value), p=num(tr.querySelector('.price').value);
+      const amt=q*p; subtotal+=amt; tr.querySelector('.amount').textContent='¥'+yen(amt);
+    });
+    const foot=document.getElementById('itemsFoot'); foot.innerHTML='';
+    let grand=subtotal;
+    if(document.getElementById('kanriChk').checked){
+      const rate=num(document.getElementById('kanriRate').textContent)/100;
+      const kanri=Math.round(subtotal*rate); grand=subtotal+kanri;
+      foot.innerHTML+=`<tr class="kanri"><td colspan="5" style="text-align:right">管理費（${num(document.getElementById('kanriRate').textContent)}%）</td><td class="num">¥${yen(kanri)}</td><td class="no-print"></td></tr>`;
+    }
+    foot.innerHTML+=`<tr class="total"><td colspan="5" style="text-align:right">総計（消費税抜き）</td><td class="num">¥${yen(grand)}</td><td class="no-print"></td></tr>`;
+    document.getElementById('grandTotal').textContent=yen(grand);
+  }
+
+  function toggleMaster(){const p=document.getElementById('masterPanel'); p.style.display=(p.style.display==='block')?'none':'block';}
+  function addMasterRow(name="", price="", unit="式"){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td contenteditable="true">${name}</td>
+      <td><input class="cell num mprice" value="${price}"></td>
+      <td><input class="cell center munit" value="${unit}"></td>
+      <td class="center"><button class="ins" onclick="insertFromMaster(this)">挿入</button></td>
+      <td class="center"><button class="mdel" onclick="this.closest('tr').remove()">×</button></td>`;
+    document.getElementById('masterBody').appendChild(tr);
+  }
+  function insertFromMaster(btn){
+    const tr=btn.closest('tr');
+    addRow(tr.children[0].textContent, 1, tr.querySelector('.munit').value, num(tr.querySelector('.mprice').value));
+  }
+  function saveMaster(){
+    const data=[...document.querySelectorAll('#masterBody tr')].map(tr=>({
+      name:tr.children[0].textContent, price:tr.querySelector('.mprice').value, unit:tr.querySelector('.munit').value }));
+    localStorage.setItem('ems_master', JSON.stringify(data)); alert('単価マスタを保存しました。');
+  }
+  function loadMaster(){
+    const saved=localStorage.getItem('ems_master');
+    const data=saved?JSON.parse(saved):DEFAULT_MASTER;
+    document.getElementById('masterBody').innerHTML=''; data.forEach(r=>addMasterRow(r.name,r.price,r.unit));
+  }
+  function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
+
+  window.onload=async function(){
+    document.getElementById('rUri').textContent='リダイレクトURI: '+window.location.origin+window.location.pathname;
+    initSelects(); loadMaster();
+    const d=new Date(), p=n=>('0'+n).slice(-2);
+    document.getElementById('issueDate').textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+    document.getElementById('estNo').textContent=`${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-001`;
+    applyOffice(); applyTantou(); updateStamp();
+    addRow("",1,"式",""); calc();
+    try{ await initAuth(); }catch(e){ console.warn(e); }
+  };
+</script>
+</body>
+</html>
