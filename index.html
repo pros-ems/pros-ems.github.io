@@ -126,6 +126,8 @@
   <button id="loginBtn" onclick="signIn()">ログイン</button>
   <label>事業所：<select id="officeSel" onchange="applyOffice()"></select></label>
   <label>担当：<select id="tantouSel" onchange="applyTantou()"></select></label>
+  <label>取引先：<select id="clientSel" onchange="applyClient()"><option value="">― 選択 ―</option></select></label>
+  <button onclick="toggleClientMaster()">取引先マスタ</button>
   <button onclick="addRow()">＋行</button>
   <button onclick="toggleMaster()">単価マスタ</button>
   <button onclick="window.print()">PDF/印刷</button>
@@ -143,6 +145,17 @@
   </table>
   <div class="addbar"><button onclick="addMasterRow()">＋ マスタ項目を追加</button><button onclick="saveMaster()">マスタを保存</button></div>
   <div class="note">※標準単価を登録し、行の「挿入」で見積に呼び出せます。事業所ごとの単価バラつき防止用。値はこのブラウザに保存されます。</div>
+</div>
+
+<!-- 取引先マスタ -->
+<div class="master no-print" id="clientPanel">
+  <h2>取引先マスタ（会社名・部署名・担当者名を紐づけ登録）</h2>
+  <table>
+    <thead><tr><th style="width:35%">会社名</th><th style="width:30%">部署名</th><th style="width:20%">担当者名</th><th style="width:60px">選択</th><th style="width:30px"></th></tr></thead>
+    <tbody id="clientBody"></tbody>
+  </table>
+  <div class="addbar"><button onclick="addClientRow()">＋ 取引先を追加</button><button onclick="saveClients()">取引先マスタを保存</button></div>
+  <div class="note">登録した取引先は、上の「取引先」プルダウンや各行「選択」で会社名・部署名・担当者名をまとめて入力できます。<b>全員で共有（SharePointに保存）</b>。</div>
 </div>
 
 <div class="page" id="page">
@@ -232,7 +245,7 @@
   async function initAuth(){
     await msalApp.initialize();
     const accts = msalApp.getAllAccounts();
-    if(accts.length){ account = accts[0]; showAuth(); refreshEstNo(); }
+    if(accts.length){ account = accts[0]; showAuth(); refreshEstNo(); loadClients(); }
   }
   function showAuth(){
     document.getElementById('authStatus').textContent = account ? `${account.name} でログイン中` : "未ログイン";
@@ -244,7 +257,7 @@
   async function signIn(){
     try{
       const r = await msalApp.loginPopup({ scopes: SCOPES });
-      account = r.account; showAuth(); refreshEstNo();
+      account = r.account; showAuth(); refreshEstNo(); loadClients();
     }catch(e){ document.getElementById('loginErr').textContent = "ログインに失敗しました：" + e.message; }
   }
   function signOut(){ msalApp.logoutPopup(); account=null; showAuth(); }
@@ -327,17 +340,7 @@
 
       const base = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
 
-      // ① 元データ(JSON) を保存
-      const json = JSON.stringify({
-        estNo, issue, client, dept, person, koji, total, tantou, office, author, savedAt: stamp,
-        pageHtml: document.getElementById('page').innerHTML
-      }, null, 2);
-      await graph(
-        `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent(base)}.json:/content`,
-        { method:"PUT", headers:{ "Content-Type":"application/json" }, body: json }
-      );
-
-      // ② PDF を保存（見た目そのまま）
+      // ① PDF を保存（見た目そのまま）
       const pdfBlob = await makePdfBlob();
       await graph(
         `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent(base)}.pdf:/content`,
@@ -351,7 +354,7 @@
           body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, Number(total.replace(/,/g,''))||0, tantou, office, author, stamp, base+".pdf" ]] }) }
       );
 
-      alert(`保存しました。\n・見積フォルダ：${base}.pdf（＋再編集用 .json）\n・台帳に1行追記（作成者：${author}／${stamp}）`);
+      alert(`保存しました。\n・見積フォルダ：${base}.pdf\n・台帳に1行追記（作成者：${author}／${stamp}）`);
     }catch(e){
       alert("保存に失敗しました：\n" + e.message);
       console.error(e);
@@ -376,7 +379,11 @@
     wrap.style.cssText='position:fixed;left:-9999px;top:0;background:#fff;';
     wrap.appendChild(clone); document.body.appendChild(wrap);
     const opt={ margin:[8,8,8,8], image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2, useCORS:true, backgroundColor:'#ffffff'},
+      html2canvas:{scale:2, useCORS:true, backgroundColor:'#ffffff', onclone:function(doc){
+        doc.querySelectorAll('.k-lbl,.k-val,tr.kanri td,tr.total td').forEach(e=>e.style.backgroundColor='#ffff00');
+        doc.querySelectorAll('thead th,.r-head').forEach(e=>e.style.backgroundColor='#f0f0f0');
+        doc.querySelectorAll('td.amount').forEach(e=>e.style.backgroundColor='#fafafa');
+      }},
       jsPDF:{unit:'mm', format:'a4', orientation:'portrait'} };
     try{ return await html2pdf().set(opt).from(clone).outputPdf('blob'); }
     finally{ document.body.removeChild(wrap); }
@@ -510,6 +517,63 @@
     const data=saved?JSON.parse(saved):DEFAULT_MASTER;
     document.getElementById('masterBody').innerHTML=''; data.forEach(r=>addMasterRow(r.name,r.price,r.unit));
   }
+  // ===== 取引先マスタ（SharePoint共有） =====
+  let clients=[];
+  const CLIENT_FILE='取引先マスタ.json';
+  function toggleClientMaster(){const p=document.getElementById('clientPanel');p.style.display=(p.style.display==='block')?'none':'block';}
+  function addClientRow(company="",dept="",person=""){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td contenteditable="true">${company}</td>
+      <td contenteditable="true">${dept}</td>
+      <td contenteditable="true">${person}</td>
+      <td class="center"><button class="ins" onclick="useClientRow(this)">選択</button></td>
+      <td class="center"><button class="mdel" onclick="this.closest('tr').remove()">×</button></td>`;
+    document.getElementById('clientBody').appendChild(tr);
+  }
+  function useClientRow(btn){
+    const tr=btn.closest('tr');
+    document.getElementById('cCompany').textContent=tr.children[0].textContent.trim();
+    document.getElementById('cDept').textContent=tr.children[1].textContent.trim();
+    document.getElementById('cPerson').textContent=tr.children[2].textContent.trim();
+  }
+  function applyClient(){
+    const i=document.getElementById('clientSel').value; if(i==='') return;
+    const c=clients[i]; if(!c) return;
+    document.getElementById('cCompany').textContent=c.company||'';
+    document.getElementById('cDept').textContent=c.dept||'';
+    document.getElementById('cPerson').textContent=c.person||'';
+  }
+  function populateClientDropdown(){
+    const sel=document.getElementById('clientSel'); sel.innerHTML='<option value="">― 選択 ―</option>';
+    clients.forEach((c,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=c.company||''; sel.appendChild(o); });
+  }
+  function renderClientPanel(){ document.getElementById('clientBody').innerHTML=''; clients.forEach(c=>addClientRow(c.company,c.dept,c.person)); }
+  async function loadClients(){
+    try{
+      if(!account) return;
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      let r;
+      try{ r=await graph(`/drives/${ledDir.driveId}/items/${ledDir.itemId}:/${encodeURIComponent(CLIENT_FILE)}:/content`); }
+      catch(_){ clients=[]; populateClientDropdown(); renderClientPanel(); return; }
+      clients = typeof r==='string' ? JSON.parse(r||'[]') : (Array.isArray(r)? r : []);
+      populateClientDropdown(); renderClientPanel();
+    }catch(e){ console.warn('loadClients:', e.message); }
+  }
+  async function saveClients(){
+    try{
+      if(!account){ await signIn(); if(!account) return; }
+      clients=[...document.querySelectorAll('#clientBody tr')].map(tr=>({
+        company:tr.children[0].textContent.trim(), dept:tr.children[1].textContent.trim(), person:tr.children[2].textContent.trim()
+      })).filter(c=>c.company);
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      await graph(`/drives/${ledDir.driveId}/items/${ledDir.itemId}:/${encodeURIComponent(CLIENT_FILE)}:/content`,
+        { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(clients,null,2) });
+      populateClientDropdown();
+      alert('取引先マスタを保存しました（全員で共有されます）。');
+    }catch(e){ alert('取引先マスタの保存に失敗：'+e.message); }
+  }
+
   function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
 
   window.onload=async function(){
