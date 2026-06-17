@@ -128,6 +128,8 @@
   <label>担当：<select id="tantouSel" onchange="applyTantou()"></select></label>
   <label>取引先：<select id="clientSel" onchange="applyClient()"><option value="">― 選択 ―</option></select></label>
   <button onclick="toggleClientMaster()">取引先マスタ</button>
+  <button onclick="toggleTantouMaster()">担当マスタ</button>
+  <button onclick="openPast()">過去見積を開く</button>
   <button onclick="addRow()">＋行</button>
   <button onclick="toggleMaster()">単価マスタ</button>
   <button onclick="window.print()">PDF/印刷</button>
@@ -156,6 +158,24 @@
   </table>
   <div class="addbar"><button onclick="addClientRow()">＋ 取引先を追加</button><button onclick="saveClients()">取引先マスタを保存</button></div>
   <div class="note">登録した取引先は、上の「取引先」プルダウンや各行「選択」で会社名・部署名・担当者名をまとめて入力できます。<b>全員で共有（SharePointに保存）</b>。</div>
+</div>
+
+<!-- 担当マスタ -->
+<div class="master no-print" id="tantouPanel">
+  <h2>担当マスタ（担当者の追加・共有）</h2>
+  <table>
+    <thead><tr><th>担当者名（氏名）</th><th style="width:30px"></th></tr></thead>
+    <tbody id="tantouBody"></tbody>
+  </table>
+  <div class="addbar"><button onclick="addTantouRow()">＋ 担当を追加</button><button onclick="saveTantou()">担当マスタを保存</button></div>
+  <div class="note">氏名（例：山田 太郎）を登録すると、上の「担当」プルダウンに追加されます。赤丸印の名字は氏名の先頭（スペース前）を自動使用。<b>全員で共有（SharePointに保存）</b>。</div>
+</div>
+
+<!-- 過去見積を開く -->
+<div class="master no-print" id="pastPanel">
+  <h2>過去見積を開く（再編集・複製）</h2>
+  <div id="pastList" style="max-height:300px;overflow:auto;font-size:12px;">読み込み中…</div>
+  <div class="note">開くと内容が画面に復元されます。修正して「SharePointに保存」すると<b>新しい番号</b>で別ファイルとして保存されます（元のPDFは残ります）。</div>
 </div>
 
 <div class="page" id="page">
@@ -245,7 +265,7 @@
   async function initAuth(){
     await msalApp.initialize();
     const accts = msalApp.getAllAccounts();
-    if(accts.length){ account = accts[0]; showAuth(); refreshEstNo(); loadClients(); }
+    if(accts.length){ account = accts[0]; showAuth(); refreshEstNo(); loadClients(); loadTantou(); }
   }
   function showAuth(){
     document.getElementById('authStatus').textContent = account ? `${account.name} でログイン中` : "未ログイン";
@@ -257,7 +277,7 @@
   async function signIn(){
     try{
       const r = await msalApp.loginPopup({ scopes: SCOPES });
-      account = r.account; showAuth(); refreshEstNo(); loadClients();
+      account = r.account; showAuth(); refreshEstNo(); loadClients(); loadTantou();
     }catch(e){ document.getElementById('loginErr').textContent = "ログインに失敗しました：" + e.message; }
   }
   function signOut(){ msalApp.logoutPopup(); account=null; showAuth(); }
@@ -321,11 +341,8 @@
       if(!account){ await signIn(); if(!account) return; }
       const saveDir = await resolveShare(CONFIG.shareSaveUrl);
       const ledDir  = await resolveShare(CONFIG.shareLedgerUrl);
-
-      // 台帳を見て当日の次番号を採番（使用済みは飛ばす）
       const ledFile = await getLedgerFile(ledDir);
-      const estNo = await nextEstNo(ledDir, ledFile);
-      document.getElementById('estNo').textContent = estNo;
+
       const issue  = txt('issueDate');
       const client = txt('cCompany');
       const dept   = txt('cDept');
@@ -337,24 +354,50 @@
       const author = account.name || account.username;
       const now    = new Date();
       const stamp  = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${('0'+now.getHours()).slice(-2)}:${('0'+now.getMinutes()).slice(-2)}`;
+      const totalNum = Number(total.replace(/,/g,''))||0;
+      const ymd = currentYmd();
 
-      const base = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
+      // ===== 採番＋台帳行追加（① 同時保存の重複対策つき）=====
+      let estNo = await nextEstNo(ledDir, ledFile);
+      let base  = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
+      const addResp = await graph(
+        `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`,
+        { method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, base+".pdf" ]] }) }
+      );
+      try{
+        const rows = await graph(`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`);
+        const nums = rows.value.map(r=> (r.values&&r.values[0]&&r.values[0][0]!=null)? String(r.values[0][0]).trim():'');
+        if(nums.filter(n=>n===estNo).length>1 && addResp.index!=null){
+          let max=0; const re=new RegExp('^'+ymd+'-(\\d+)$');
+          nums.forEach(n=>{ const m=n.match(re); if(m) max=Math.max(max,parseInt(m[1],10)); });
+          const newNo=`${ymd}-${('00'+(max+1)).slice(-3)}`;
+          const newBase=sanitize(`${newNo}_${client}_${koji}`)||sanitize(newNo)||"見積";
+          await graph(
+            `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows/itemAt(index=${addResp.index})`,
+            { method:"PATCH", headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify({ values: [[ newNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, newBase+".pdf" ]] }) }
+          );
+          estNo=newNo; base=newBase;
+        }
+      }catch(e){ console.warn('重複チェック:', e.message); }
+      document.getElementById('estNo').textContent = estNo;
 
-      // ① PDF を保存（見た目そのまま）
+      // ===== PDF を保存（見積フォルダ直下）=====
       const pdfBlob = await makePdfBlob();
       await graph(
         `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent(base)}.pdf:/content`,
         { method:"PUT", headers:{ "Content-Type":"application/pdf" }, body: pdfBlob }
       );
 
-      // ③ 台帳Excelに1行追加（採番で特定済みのledFileを再利用）
+      // ===== ③ 再編集用データを「元データ」サブフォルダに保存 =====
+      const data = { estNo, issue, client, dept, person, koji, total, tantou, office, author, savedAt: stamp, pageHtml: document.getElementById('page').innerHTML };
       await graph(
-        `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`,
-        { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, Number(total.replace(/,/g,''))||0, tantou, office, author, stamp, base+".pdf" ]] }) }
+        `/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent('元データ')}/${encodeURIComponent(base)}.json:/content`,
+        { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(data) }
       );
 
-      alert(`保存しました。\n・見積フォルダ：${base}.pdf\n・台帳に1行追記（作成者：${author}／${stamp}）`);
+      alert(`保存しました（見積№ ${estNo}）。\n・見積フォルダ：${base}.pdf\n・台帳に1行追記（作成者：${author}／${stamp}）`);
     }catch(e){
       alert("保存に失敗しました：\n" + e.message);
       console.error(e);
@@ -430,7 +473,8 @@
     "綾瀬事業所":{addr:"〒252-1121　神奈川県綾瀬市小園1078-1", tel:"TEL 046-740-5071　FAX 046-740-5072"},
     "長野設計オフィス":{addr:"〒399-4117　長野県駒ヶ根市赤穂1298-2　サンポー本社ビル2F C号室", tel:"TEL 0120-084-087　FAX 0265-98-8475"}
   };
-  const TANTOU={ "佐藤 晃弘":"佐藤", "権田 直樹":"権田" };
+  let tantouList=["佐藤 晃弘","権田 直樹"];   // 既定（担当マスタで上書き・共有）
+  function surnameOf(f){ return (f||'').trim().split(/[\s　]+/)[0]; }
   const DEFAULT_MASTER=[
     {name:"設計費（機械関連）", price:330000, unit:"式"},
     {name:"設計費（電気関連）", price:70000,  unit:"式"},
@@ -441,8 +485,13 @@
   function initSelects(){
     const o=document.getElementById('officeSel');
     Object.keys(OFFICES).forEach(k=>{o.innerHTML+=`<option>${k}</option>`;});
-    const t=document.getElementById('tantouSel');
-    Object.keys(TANTOU).forEach(k=>{t.innerHTML+=`<option>${k}</option>`;});
+    populateTantouDropdown();
+  }
+  function populateTantouDropdown(){
+    const t=document.getElementById('tantouSel'); const cur=t.value;
+    t.innerHTML=''; tantouList.forEach(n=>{ const o=document.createElement('option'); o.textContent=n; t.appendChild(o); });
+    if(cur && tantouList.includes(cur)) t.value=cur;
+    applyTantou();
   }
   function applyOffice(){
     const k=document.getElementById('officeSel').value, o=OFFICES[k];
@@ -452,7 +501,7 @@
   function applyTantou(){
     const full=document.getElementById('tantouSel').value;
     document.getElementById('tantouName').textContent=full;
-    document.getElementById('stampName').textContent=TANTOU[full];
+    document.getElementById('stampName').textContent=surnameOf(full);
   }
   function updateStamp(){
     const raw=document.getElementById('issueDate').textContent.trim();
@@ -572,6 +621,71 @@
       populateClientDropdown();
       alert('取引先マスタを保存しました（全員で共有されます）。');
     }catch(e){ alert('取引先マスタの保存に失敗：'+e.message); }
+  }
+
+  // ===== 担当マスタ（SharePoint共有） =====
+  const TANTOU_FILE='担当マスタ.json';
+  function toggleTantouMaster(){const p=document.getElementById('tantouPanel');p.style.display=(p.style.display==='block')?'none':'block';}
+  function addTantouRow(name=""){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td contenteditable="true">${name}</td><td class="center"><button class="mdel" onclick="this.closest('tr').remove()">×</button></td>`;
+    document.getElementById('tantouBody').appendChild(tr);
+  }
+  function renderTantouPanel(){ document.getElementById('tantouBody').innerHTML=''; tantouList.forEach(n=>addTantouRow(n)); }
+  async function loadTantou(){
+    try{
+      if(!account) return;
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      let r;
+      try{ r=await graph(`/drives/${ledDir.driveId}/items/${ledDir.itemId}:/${encodeURIComponent(TANTOU_FILE)}:/content`); }
+      catch(_){ renderTantouPanel(); return; }
+      const arr = typeof r==='string'? JSON.parse(r||'[]') : (Array.isArray(r)? r : []);
+      if(arr.length) tantouList = arr;
+      populateTantouDropdown(); renderTantouPanel();
+    }catch(e){ console.warn('loadTantou:', e.message); }
+  }
+  async function saveTantou(){
+    try{
+      if(!account){ await signIn(); if(!account) return; }
+      tantouList=[...document.querySelectorAll('#tantouBody tr')].map(tr=>tr.children[0].textContent.trim()).filter(Boolean);
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      await graph(`/drives/${ledDir.driveId}/items/${ledDir.itemId}:/${encodeURIComponent(TANTOU_FILE)}:/content`,
+        { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(tantouList,null,2) });
+      populateTantouDropdown();
+      alert('担当マスタを保存しました（全員で共有されます）。');
+    }catch(e){ alert('担当マスタの保存に失敗：'+e.message); }
+  }
+
+  // ===== 過去見積を開く（再編集・複製） =====
+  async function openPast(){
+    const panel=document.getElementById('pastPanel'); panel.style.display='block';
+    const list=document.getElementById('pastList'); list.textContent='読み込み中…';
+    try{
+      if(!account){ await signIn(); if(!account){ list.textContent='ログインが必要です'; return; } }
+      const saveDir=await resolveShare(CONFIG.shareSaveUrl);
+      let children;
+      try{ children=await graph(`/drives/${saveDir.driveId}/items/${saveDir.itemId}:/${encodeURIComponent('元データ')}:/children?$select=id,name&$top=200`); }
+      catch(_){ list.textContent='保存された見積がまだありません。'; return; }
+      const files=(children.value||[]).filter(f=>f.name.endsWith('.json')).sort((a,b)=>b.name.localeCompare(a.name));
+      if(!files.length){ list.textContent='保存された見積がまだありません。'; return; }
+      list.innerHTML='';
+      files.forEach(f=>{
+        const row=document.createElement('div'); row.style.cssText='display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;padding:4px 0;gap:8px;';
+        const nm=document.createElement('span'); nm.textContent=f.name.replace(/\.json$/,''); nm.style.cssText='flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        const btn=document.createElement('button'); btn.className='ins'; btn.textContent='開く';
+        btn.onclick=()=>loadPast(saveDir.driveId,f.id,f.name);
+        row.appendChild(nm); row.appendChild(btn); list.appendChild(row);
+      });
+    }catch(e){ list.textContent='取得失敗：'+e.message; }
+  }
+  async function loadPast(driveId,fileId,name){
+    try{
+      const r=await graph(`/drives/${driveId}/items/${fileId}/content`);
+      const data = typeof r==='string'? JSON.parse(r): r;
+      if(data.pageHtml){ document.getElementById('page').innerHTML=data.pageHtml; calc(); }
+      document.getElementById('pastPanel').style.display='none';
+      alert(`「${name.replace(/\.json$/,'')}」を開きました。\n修正後に「SharePointに保存」すると新しい番号で保存されます（元PDFは残ります）。\n※日付を今日にしたい場合は発効日を書き換えてください。`);
+    }catch(e){ alert('読み込み失敗：'+e.message); }
   }
 
   function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
