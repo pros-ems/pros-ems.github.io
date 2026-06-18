@@ -350,6 +350,7 @@
       const saveDir = await resolveShare(CONFIG.shareSaveUrl);
       const ledDir  = await resolveShare(CONFIG.shareLedgerUrl);
       const ledFile = await getLedgerFile(ledDir);
+      await ensureLedger(ledDir, ledFile);
 
       const issue  = txt('issueDate');
       const client = txt('cCompany');
@@ -465,6 +466,33 @@
     const f = ch.value.find(x=>x.name===CONFIG.ledgerFile);
     if(!f) throw new Error(`台帳ファイル「${CONFIG.ledgerFile}」が台帳フォルダにありません。アップロードしてください。`);
     return f;
+  }
+  // 台帳の3テーブルが無ければ自動作成（見積/納品書/請求書）
+  const LEDGER_DEFS = {
+    '見積':   ['見積No','発行日','客先名','部署名','工事名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名'],
+    '納品書': ['納品書No','見積No','発行日','客先名','件名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名'],
+    '請求書': ['請求書No','見積No','発行日','客先名','件名','税抜合計','消費税','御請求額','担当','事業所','作成者','保存日時','ファイル名']
+  };
+  let _ledgerReady=false;
+  function colLetter(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26|0; } return s; }
+  async function ensureLedger(ledDir, ledFile){
+    if(_ledgerReady) return;
+    const wb=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook`;
+    const sheets=(await graph(`${wb}/worksheets?$select=name`)).value.map(w=>w.name);
+    const tables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
+    for(const sheet of Object.keys(LEDGER_DEFS)){
+      if(tables.includes(sheet)) continue;
+      const headers=LEDGER_DEFS[sheet]; const last=colLetter(headers.length);
+      if(!sheets.includes(sheet)){
+        await graph(`${wb}/worksheets/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sheet})});
+      }
+      await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/range(address='A1:${last}1')`,
+        {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[headers]})});
+      const t=await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/tables/add`,
+        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:`A1:${last}1`,hasHeaders:true})});
+      await graph(`${wb}/tables/${t.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sheet})});
+    }
+    _ledgerReady=true;
   }
   async function nextEstNo(ledDir, ledFile){
     const ymd = currentYmd();
@@ -805,6 +833,7 @@
       const dir=await resolveShare(folderUrl);
       const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
       const ledFile=await getLedgerFile(ledDir);
+      await ensureLedger(ledDir, ledFile);
       // 採番：見積No-N{nn} / 見積No-S{nn}
       let seq=0;
       try{
