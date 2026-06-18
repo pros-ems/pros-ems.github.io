@@ -764,7 +764,7 @@
     const items=collectItems(); const subtotal=items.reduce((s,it)=>s+it.amount,0);
     const y=n=>'¥'+Math.round(n).toLocaleString('ja-JP');
     const title=type==='invoice'?'御 請 求 書':'納 品 書';
-    const maxRows=Math.max(items.length,8); let rows='';
+    const maxRows=Math.max(items.length,6); let rows='';
     for(let i=0;i<maxRows;i++){ const it=items[i];
       rows+=`<tr>
         <td style="border:1px solid #000;padding:4px 6px;height:22px;">${it?it.name:''}</td>
@@ -827,10 +827,20 @@
   async function makeDocPdfBlob(html){
     const wrap=document.createElement('div'); wrap.style.cssText='position:fixed;left:-9999px;top:0;background:#fff;';
     wrap.innerHTML=html; document.body.appendChild(wrap);
-    const opt={ margin:[8,8,8,8], image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} };
-    try{ return await html2pdf().set(opt).from(wrap.firstElementChild).outputPdf('blob'); }
-    finally{ document.body.removeChild(wrap); }
+    try{
+      // キャンバス化 → A4 1ページに収まるよう拡縮して配置（途切れ防止）
+      const JsPDF=(window.jspdf&&window.jspdf.jsPDF)||window.jsPDF;
+      if(!JsPDF){ // フォールバック（通常は使われない）
+        return await html2pdf().set({margin:[8,8,8,8],image:{type:'jpeg',quality:0.98},html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}}).from(wrap.firstElementChild).outputPdf('blob');
+      }
+      const canvas=await html2pdf().set({html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'}}).from(wrap.firstElementChild).toCanvas().get('canvas');
+      const pdf=new JsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+      const pw=210, ph=297, m=8, availW=pw-m*2, availH=ph-m*2;
+      let w=availW, h=canvas.height*availW/canvas.width;
+      if(h>availH){ h=availH; w=canvas.width*availH/canvas.height; }
+      pdf.addImage(canvas.toDataURL('image/jpeg',0.98),'JPEG',m,m,w,h);
+      return pdf.output('blob');
+    } finally{ document.body.removeChild(wrap); }
   }
   async function createDoc(type){
     try{
