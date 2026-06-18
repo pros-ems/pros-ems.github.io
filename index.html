@@ -494,7 +494,7 @@
     "綾瀬事業所":{addr:"〒252-1121　神奈川県綾瀬市小園1078-1", tel:"TEL 046-740-5071　FAX 046-740-5072"},
     "長野設計オフィス":{addr:"〒399-4117　長野県駒ヶ根市赤穂1298-2　サンポー本社ビル2F C号室", tel:"TEL 0120-084-087　FAX 0265-98-8475"}
   };
-  let tantouList=["佐藤 晃弘","権田 直樹"];   // 既定（担当マスタで上書き・共有）
+  let tantouList=[];   // 担当はSharePointの担当マスタ(担当マスタ.json)で管理（ソースに氏名を書かない）
   function surnameOf(f){ return (f||'').trim().split(/[\s　]+/)[0]; }
   const DEFAULT_MASTER=[
     {name:"設計費（機械関連）", price:330000, unit:"式"},
