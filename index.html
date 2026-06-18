@@ -132,6 +132,8 @@
   <button onclick="toggleTantouMaster()">担当マスタ</button>
   <button onclick="toggleMaster()">単価マスタ</button>
   <button onclick="openPast()">過去見積を開く</button>
+  <button onclick="createDelivery()">納品書を作成</button>
+  <button onclick="createInvoice()">請求書を作成</button>
   <button onclick="addRow()">＋行</button>
   <button class="save-sp" onclick="saveToSharePoint()">SharePointに保存</button>
   <button onclick="printDoc()">PDF/印刷</button>
@@ -244,11 +246,15 @@
   const CONFIG = {
     clientId: "665c09da-9aab-4ea3-8391-f0654d64113d",
     tenantId: "325204d3-2d66-4bcd-9a16-aea61e12fd74",
-    // ▼ いただいた共有リンクで保存先フォルダを直接特定（フォルダ名不要）
-    shareSaveUrl:   "https://pros123.sharepoint.com/:f:/s/ems/IgBTxsk9cHw_SYZFywmsJTY0Aa0ZIxrSmdndYa3BcwgbLFU",
-    shareLedgerUrl: "https://pros123.sharepoint.com/:f:/s/ems/IgAJF6U3-TMBRZFwpCIF8IdeAQWyN_sxaNUs5-G2T5yj3L4",
-    ledgerFile:   "見積台帳.xlsx",
-    tableName:    "見積台帳"
+    // ▼ 共有リンクで保存先フォルダを直接特定
+    shareSaveUrl:     "https://pros123.sharepoint.com/:f:/s/ems/IgBTxsk9cHw_SYZFywmsJTY0Aa0ZIxrSmdndYa3BcwgbLFU", // 見積一覧
+    shareLedgerUrl:   "https://pros123.sharepoint.com/:f:/s/ems/IgAJF6U3-TMBRZFwpCIF8IdeAQWyN_sxaNUs5-G2T5yj3L4", // 台帳(見積り)＝番号一覧.xlsx
+    shareDeliveryUrl: "https://pros123.sharepoint.com/:f:/s/ems/IgDo2PdBB7oURIJuHJuWW23OAZxKS-UrepriWW01jpTST4I", // 納品書一覧
+    shareInvoiceUrl:  "https://pros123.sharepoint.com/:f:/s/ems/IgCEGaFH7eRIQrgZYS_c01rTAc9C1ug4bmcanSrZqUAYVRA", // 請求書一覧
+    ledgerFile:    "番号一覧.xlsx",
+    tableName:     "見積",     // 見積シートのテーブル
+    tableDelivery: "納品書",
+    tableInvoice:  "請求書"
   };
   const SCOPES = ["User.Read","Files.ReadWrite.All","Sites.ReadWrite.All"];
 
@@ -705,6 +711,130 @@
       alert(`「${name.replace(/\.json$/,'')}」を開きました。\n修正後に「SharePointに保存」すると新しい番号で保存されます（元PDFは残ります）。\n※日付を今日にしたい場合は発効日を書き換えてください。`);
     }catch(e){ alert('読み込み失敗：'+e.message); }
   }
+
+  // ===== 納品書・請求書の作成（見積データを流用） =====
+  function collectItems(){
+    return [...document.querySelectorAll('#itemsBody tr.item')].map(tr=>{
+      const q=num(tr.querySelector('.qty').value), p=num(tr.querySelector('.price').value);
+      return { name:tr.children[1].textContent.trim(), qty:tr.querySelector('.qty').value, unit:tr.children[3].textContent.trim(), price:p, amount:q*p };
+    });
+  }
+  function docHtml(type, docNo){
+    const client=txt('cCompany'), koji=txt('kojiName'), tantou=document.getElementById('tantouSel').value;
+    const o=OFFICES[document.getElementById('officeSel').value]||{addr:'',tel:''};
+    const estNo=txt('estNo'), issue=txt('issueDate');
+    const items=collectItems(); const subtotal=items.reduce((s,it)=>s+it.amount,0);
+    const y=n=>'¥'+Math.round(n).toLocaleString('ja-JP');
+    const title=type==='invoice'?'御 請 求 書':'納 品 書';
+    const maxRows=Math.max(items.length,8); let rows='';
+    for(let i=0;i<maxRows;i++){ const it=items[i];
+      rows+=`<tr>
+        <td style="border:1px solid #000;padding:4px 6px;height:22px;">${it?it.name:''}</td>
+        <td style="border:1px solid #000;padding:4px 6px;text-align:center;">${it?it.qty:''}</td>
+        <td style="border:1px solid #000;padding:4px 6px;text-align:center;">${it?it.unit:''}</td>
+        <td style="border:1px solid #000;padding:4px 6px;text-align:right;">${it?y(it.price):''}</td>
+        <td style="border:1px solid #000;padding:4px 6px;text-align:right;">${it?y(it.amount):''}</td>
+        <td style="border:1px solid #000;padding:4px 6px;"></td></tr>`;
+    }
+    let amountBlock='', bankBlock='', noteLine='', footExtra='';
+    if(type==='invoice'){
+      const tax=Math.round(subtotal*0.1), grand=subtotal+tax;
+      amountBlock=`<table style="border-collapse:collapse;margin:10px 0;"><tr>
+        <td style="border:1px solid #000;padding:6px 14px;background:#f0f0f0;">税抜金額合計</td>
+        <td style="border:1px solid #000;padding:6px 14px;background:#f0f0f0;">消費税額(10%)</td>
+        <td style="border:1px solid #000;padding:6px 14px;background:#ffff00;font-weight:bold;">御請求額</td></tr><tr>
+        <td style="border:1px solid #000;padding:6px 14px;text-align:right;">${y(subtotal)}</td>
+        <td style="border:1px solid #000;padding:6px 14px;text-align:right;">${y(tax)}</td>
+        <td style="border:1px solid #000;padding:6px 14px;text-align:right;background:#ffff00;font-weight:bold;">${y(grand)}</td></tr></table>`;
+      bankBlock=`<div style="font-size:11px;margin:6px 0;">お振込みは下記の銀行へお願い致します。<br>横浜銀行　大和支店　普通預金　1696950　プロス（カ<br>登録番号：T8021001028806</div>`;
+      footExtra=`<div style="margin-top:8px;font-size:11px;">特記事項　支払条件：貴社ご指定通り</div>`;
+    } else {
+      noteLine=`<div style="margin:12px 0;font-size:12px;">下記のとおり納品いたしました。</div>`;
+    }
+    return `<div style="font-family:'Yu Gothic','Meiryo',sans-serif;color:#000;font-size:12px;width:720px;padding:10px;">
+      <div style="text-align:center;margin-bottom:12px;"><span style="font-size:24px;font-weight:bold;letter-spacing:.3em;border-bottom:2px solid #000;padding:0 8px 6px;">${title}</span></div>
+      <div style="display:flex;justify-content:space-between;gap:20px;">
+        <div style="flex:1.1;">
+          <div style="font-size:16px;font-weight:bold;border-bottom:1px solid #333;display:inline-block;padding-bottom:2px;">${client}　御中</div>
+          <div style="margin-top:10px;">件名：${koji}</div>
+        </div>
+        <div style="text-align:right;font-size:11px;">
+          <div>No. ${docNo}</div>
+          <div>発行日　${issue}</div>
+          <img src="logo.png" style="height:26px;margin:8px 0;display:inline-block;">
+          <div style="font-size:9px;white-space:nowrap;">${o.addr}</div>
+          <div>${o.tel}</div>
+          <div style="margin-top:6px;font-weight:bold;">担当　${tantou}</div>
+        </div>
+      </div>
+      ${amountBlock}${bankBlock}${noteLine}
+      <table style="border-collapse:collapse;width:100%;margin-top:6px;">
+        <thead><tr>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;">名称／型式</th>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;width:50px;">数量</th>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;width:45px;">単位</th>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;width:95px;">単価</th>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;width:105px;">（税抜）金額</th>
+          <th style="border:1px solid #000;padding:5px;background:#f0f0f0;width:70px;">適用</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr>
+          <td colspan="4" style="border:1px solid #000;padding:5px;text-align:right;font-weight:bold;background:#ffff00;">合計（税抜）</td>
+          <td style="border:1px solid #000;padding:5px;text-align:right;font-weight:bold;background:#ffff00;">${y(subtotal)}</td>
+          <td style="border:1px solid #000;background:#ffff00;"></td></tr></tfoot>
+      </table>
+      ${footExtra}
+      <div style="margin-top:6px;font-size:11px;">発注№　${estNo}</div>
+    </div>`;
+  }
+  async function makeDocPdfBlob(html){
+    const wrap=document.createElement('div'); wrap.style.cssText='position:fixed;left:-9999px;top:0;background:#fff;';
+    wrap.innerHTML=html; document.body.appendChild(wrap);
+    const opt={ margin:[8,8,8,8], image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff'}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} };
+    try{ return await html2pdf().set(opt).from(wrap.firstElementChild).outputPdf('blob'); }
+    finally{ document.body.removeChild(wrap); }
+  }
+  async function createDoc(type){
+    try{
+      if(!account){ await signIn(); if(!account) return; }
+      const estNo=txt('estNo');
+      if(!estNo){ alert('先に見積№が必要です。'); return; }
+      const folderUrl=type==='invoice'?CONFIG.shareInvoiceUrl:CONFIG.shareDeliveryUrl;
+      const tableNm=type==='invoice'?CONFIG.tableInvoice:CONFIG.tableDelivery;
+      const letter=type==='invoice'?'S':'N';
+      const dir=await resolveShare(folderUrl);
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      const ledFile=await getLedgerFile(ledDir);
+      // 採番：見積No-N{nn} / 見積No-S{nn}
+      let seq=0;
+      try{
+        const rows=await graph(`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(tableNm)}/rows`);
+        const re=new RegExp('^'+estNo.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'-'+letter+'(\\d+)$');
+        rows.value.forEach(r=>{ const v=r.values&&r.values[0]&&r.values[0][0]; const m=v!=null&&String(v).match(re); if(m) seq=Math.max(seq,parseInt(m[1],10)); });
+      }catch(_){}
+      const docNo=`${estNo}-${letter}${('0'+(seq+1)).slice(-2)}`;
+      const client=txt('cCompany'), koji=txt('kojiName');
+      const base=sanitize(`${docNo}_${client}_${koji}`)||docNo;
+      // PDF
+      const blob=await makeDocPdfBlob(docHtml(type,docNo));
+      await graph(`/drives/${dir.driveId}/items/${dir.itemId}:/${encodeURIComponent(base)}.pdf:/content`,
+        {method:"PUT",headers:{"Content-Type":"application/pdf"},body:blob});
+      // 番号一覧へ記録
+      const items=collectItems(); const subtotal=items.reduce((s,it)=>s+it.amount,0);
+      const tantou=document.getElementById('tantouSel').value, office=document.getElementById('officeSel').value;
+      const author=account.name||account.username; const now=new Date();
+      const stamp=`${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${('0'+now.getHours()).slice(-2)}:${('0'+now.getMinutes()).slice(-2)}`;
+      const issue=txt('issueDate');
+      let values;
+      if(type==='invoice'){ const tax=Math.round(subtotal*0.1); values=[[docNo,estNo,issue,client,koji,subtotal,tax,subtotal+tax,tantou,office,author,stamp,base+'.pdf']]; }
+      else { values=[[docNo,estNo,issue,client,koji,subtotal,tantou,office,author,stamp,base+'.pdf']]; }
+      await graph(`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(tableNm)}/rows`,
+        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({values})});
+      alert(`${type==='invoice'?'請求書':'納品書'}を作成しました（No. ${docNo}）。\n・フォルダに ${base}.pdf\n・番号一覧[${tableNm}]に1行追記`);
+    }catch(e){ alert('作成に失敗：'+e.message); console.error(e); }
+  }
+  function createDelivery(){ return createDoc('delivery'); }
+  function createInvoice(){ return createDoc('invoice'); }
 
   function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
 
