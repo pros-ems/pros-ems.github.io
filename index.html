@@ -478,19 +478,29 @@
   async function ensureLedger(ledDir, ledFile){
     if(_ledgerReady) return;
     const wb=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook`;
-    const sheets=(await graph(`${wb}/worksheets?$select=name`)).value.map(w=>w.name);
-    const tables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
-    for(const sheet of Object.keys(LEDGER_DEFS)){
-      if(tables.includes(sheet)) continue;
+    const allTables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
+    const missing=Object.keys(LEDGER_DEFS).filter(s=>!allTables.includes(s));
+    if(!missing.length){ _ledgerReady=true; return; }
+    // 作成が必要 → ワークブックセッションで高速化（504タイムアウト回避）
+    let sid=''; try{ sid=(await graph(`${wb}/createSession`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({persistChanges:true})})).id; }catch(_){}
+    const H=sid?{'workbook-session-id':sid}:{};
+    const sheetNames=(await graph(`${wb}/worksheets?$select=name`,{headers:H})).value.map(w=>w.name);
+    for(const sheet of missing){
       const headers=LEDGER_DEFS[sheet]; const last=colLetter(headers.length);
-      if(!sheets.includes(sheet)){
-        await graph(`${wb}/worksheets/add`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sheet})});
+      if(!sheetNames.includes(sheet)){
+        await graph(`${wb}/worksheets/add`,{method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:sheet})});
       }
-      await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/range(address='A1:${last}1')`,
-        {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:[headers]})});
-      const t=await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/tables/add`,
-        {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:`A1:${last}1`,hasHeaders:true})});
-      await graph(`${wb}/tables/${t.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:sheet})});
+      // 前回失敗で名無しテーブルが残っていれば改名、無ければ新規作成
+      let onSheet=[]; try{ onSheet=(await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/tables?$select=id,name`,{headers:H})).value; }catch(_){}
+      if(onSheet.length){
+        await graph(`${wb}/tables/${onSheet[0].id}`,{method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:sheet})});
+      } else {
+        await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/range(address='A1:${last}1')`,
+          {method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({values:[headers]})});
+        const t=await graph(`${wb}/worksheets/${encodeURIComponent(sheet)}/tables/add`,
+          {method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({address:`A1:${last}1`,hasHeaders:true})});
+        await graph(`${wb}/tables/${t.id}`,{method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:sheet})});
+      }
     }
     _ledgerReady=true;
   }
