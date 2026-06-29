@@ -231,7 +231,11 @@
 
   <div class="addbar no-print">
     <button onclick="addRow()">＋ 明細行を追加</button>
-    <label style="font-size:12px; color:#333;"><input type="checkbox" id="kanriChk" onchange="calc()"> 管理費（<span contenteditable="true" id="kanriRate" oninput="calc()">5</span>%）を自動算出</label>
+    <span style="font-size:12px; color:#333;">管理費を自動算出：
+      <label><input type="checkbox" class="kanriChk" value="5" onchange="kanriPick(this)"> 5%</label>
+      <label><input type="checkbox" class="kanriChk" value="10" onchange="kanriPick(this)"> 10%</label>
+      <label><input type="checkbox" class="kanriChk" value="20" onchange="kanriPick(this)"> 20%</label>
+    </span>
   </div>
 
   <div class="remarks">
@@ -585,6 +589,9 @@
   }
   function num(v){return parseFloat(String(v).replace(/[^\d.\-]/g,''))||0;}
   function yen(n){return Math.round(n).toLocaleString('ja-JP');}
+  // 管理費：5/10/20% を排他選択（チェックは1つだけ）
+  function kanriPick(cb){ if(cb.checked){ document.querySelectorAll('.kanriChk').forEach(c=>{ if(c!==cb) c.checked=false; }); } calc(); }
+  function kanriRate(){ const c=document.querySelector('.kanriChk:checked'); return c? num(c.value):0; }
   function calc(){
     let subtotal=0;
     document.querySelectorAll('#itemsBody tr.item').forEach((tr,i)=>{
@@ -594,10 +601,10 @@
     });
     const foot=document.getElementById('itemsFoot'); foot.innerHTML='';
     let grand=subtotal;
-    if(document.getElementById('kanriChk').checked){
-      const rate=num(document.getElementById('kanriRate').textContent)/100;
-      const kanri=Math.round(subtotal*rate); grand=subtotal+kanri;
-      foot.innerHTML+=`<tr class="kanri"><td colspan="5" style="text-align:right">管理費（${num(document.getElementById('kanriRate').textContent)}%）</td><td class="num">¥${yen(kanri)}</td><td class="no-print"></td></tr>`;
+    const kr=kanriRate();
+    if(kr>0){
+      const kanri=Math.round(subtotal*kr/100); grand=subtotal+kanri;
+      foot.innerHTML+=`<tr class="kanri"><td colspan="5" style="text-align:right">管理費（${kr}%）</td><td class="num">¥${yen(kanri)}</td><td class="no-print"></td></tr>`;
     }
     foot.innerHTML+=`<tr class="total"><td colspan="5" style="text-align:right">総計（消費税抜き）</td><td class="num">¥${yen(grand)}</td><td class="no-print"></td></tr>`;
     document.getElementById('grandTotal').textContent=yen(grand);
