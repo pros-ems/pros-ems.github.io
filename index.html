@@ -47,7 +47,8 @@
   .crow .lbl{width:78px; color:#000; font-size:12px; flex:none;}
   .crow .val{width:250px; flex:none; border-bottom:1px solid #333; min-height:18px; padding:0 4px 2px;}
   .crow .suffix{margin-left:6px; font-size:12px;}
-  .right{flex:1; font-size:12px;}
+  .right{flex:1; font-size:12px; position:relative;}
+  .company-seal{position:absolute; right:-2px; top:92px; width:58px; height:58px; z-index:3;}
   .meta{display:grid; grid-template-columns:auto 1fr; gap:7px 8px; margin-bottom:7px; justify-items:end; align-items:end;}
   .meta .m-lbl{color:#000;}
   .meta .m-val{border-bottom:1px solid #999; width:185px; min-height:18px; text-align:left; padding:0 4px 2px;}
@@ -128,6 +129,7 @@
   <label>事業所：<select id="officeSel" onchange="applyOffice()"></select></label>
   <label>担当：<select id="tantouSel" onchange="applyTantou()"></select></label>
   <label>取引先：<select id="clientSel" onchange="applyClient()"><option value="">― 選択 ―</option></select></label>
+  <label style="font-size:11px;"><input type="checkbox" id="personalSealChk" onchange="togglePersonalSeal()"> 個人印</label>
   <button onclick="toggleClientMaster()">取引先マスタ</button>
   <button onclick="toggleTantouMaster()">担当マスタ</button>
   <button onclick="toggleMaster()">単価マスタ</button>
@@ -204,8 +206,9 @@
       </div>
       <div class="tantou-wrap">
         <span class="tantou">担当　<span id="tantouName"></span></span>
-        <div class="stamp"><span class="s1">PROS</span><span class="s2" id="stampDate"></span><span class="s3" id="stampName"></span></div>
+        <div class="stamp" id="dateStamp"><span class="s1">PROS</span><span class="s2" id="stampDate"></span><span class="s3" id="stampName"></span></div>
       </div>
+      <img class="company-seal" src="seal.png" alt="社印">
     </div>
   </div>
 
@@ -885,6 +888,10 @@
   function createDelivery(){ return createDoc('delivery'); }
   function createInvoice(){ return createDoc('invoice'); }
 
+  function togglePersonalSeal(){
+    document.getElementById('dateStamp').style.display = document.getElementById('personalSealChk').checked ? 'flex' : 'none';
+  }
+
   function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
 
   window.onload=async function(){
@@ -894,7 +901,7 @@
     const d=new Date(), p=n=>('0'+n).slice(-2);
     document.getElementById('issueDate').textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
     document.getElementById('estNo').textContent=`${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-001`;
-    applyOffice(); applyTantou(); updateStamp();
+    applyOffice(); applyTantou(); updateStamp(); togglePersonalSeal();
     addRow("",1,"式",""); calc();
     try{ await initAuth(); }catch(e){ console.warn(e); }
   };
