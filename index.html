@@ -138,6 +138,8 @@
   <button onclick="createInvoice()">請求書を作成</button>
   <button onclick="addRow()">＋行</button>
   <button class="save-sp" onclick="saveToSharePoint()">SharePointに保存</button>
+  <button onclick="saveToSharePoint(true)">改訂版で保存</button>
+  <button onclick="openStatus()">受注状況</button>
   <button onclick="printDoc()">PDF/印刷</button>
   <button class="ghost" onclick="resetAll()">新規</button>
   <button class="ghost" onclick="listFolders()" title="保存先フォルダ名の確認用">📁確認</button>
@@ -180,7 +182,14 @@
 <div class="master no-print" id="pastPanel">
   <h2>過去見積を開く（再編集・複製）<button onclick="document.getElementById('pastPanel').style.display='none'" style="float:right;font-size:11px;padding:2px 8px;">✕ 閉じる</button></h2>
   <div id="pastList" style="max-height:300px;overflow:auto;font-size:12px;">読み込み中…</div>
-  <div class="note">開くと内容が画面に復元されます。修正して「SharePointに保存」すると<b>新しい番号</b>で別ファイルとして保存されます（元のPDFは残ります）。</div>
+  <div class="note">開くと内容が画面に復元されます。修正して「SharePointに保存」すると<b>新しい番号</b>で、「改訂版で保存」すると<b>子番号（元番号-枝番）</b>で保存されます（元のPDFは残ります）。</div>
+</div>
+
+<!-- 受注状況 -->
+<div class="master no-print" id="statusPanel">
+  <h2>受注状況（見積台帳）<button onclick="document.getElementById('statusPanel').style.display='none'" style="float:right;font-size:11px;padding:2px 8px;">✕ 閉じる</button></h2>
+  <div id="statusList" style="max-height:340px;overflow:auto;font-size:12px;">読み込み中…</div>
+  <div class="note">各見積の状態（受注／失注／検討中）を選ぶと台帳の「状態」列に反映されます（全員で共有）。改訂版（子番号）は個別の行として表示されます。</div>
 </div>
 
 <div class="page" id="page">
@@ -351,7 +360,7 @@
   /* ===================== SharePoint 保存 ===================== */
   function sanitize(s){ return (s||"").replace(/[\\\/:*?"<>|]/g,"_").trim().slice(0,80); }
 
-  async function saveToSharePoint(){
+  async function saveToSharePoint(revision){
     try{
       if(!account){ await signIn(); if(!account) return; }
       const saveDir = await resolveShare(CONFIG.shareSaveUrl);
@@ -372,31 +381,42 @@
       const stamp  = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${('0'+now.getHours()).slice(-2)}:${('0'+now.getMinutes()).slice(-2)}`;
       const totalNum = Number(total.replace(/,/g,''))||0;
       const ymd = currentYmd();
+      const T = `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`;
 
-      // ===== 採番＋台帳行追加（① 同時保存の重複対策つき）=====
-      let estNo = await nextEstNo(ledDir, ledFile);
-      let base  = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
-      const addResp = await graph(
-        `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`,
-        { method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, base+".pdf" ]] }) }
-      );
-      try{
-        const rows = await graph(`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows`);
-        const nums = rows.value.map(r=> (r.values&&r.values[0]&&r.values[0][0]!=null)? String(r.values[0][0]).trim():'');
-        if(nums.filter(n=>n===estNo).length>1 && addResp.index!=null){
-          let max=0; const re=new RegExp('^'+ymd+'-(\\d+)$');
-          nums.forEach(n=>{ const m=n.match(re); if(m) max=Math.max(max,parseInt(m[1],10)); });
-          const newNo=`${ymd}-${('00'+(max+1)).slice(-3)}`;
-          const newBase=sanitize(`${newNo}_${client}_${koji}`)||sanitize(newNo)||"見積";
-          await graph(
-            `/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows/itemAt(index=${addResp.index})`,
-            { method:"PATCH", headers:{ "Content-Type":"application/json" },
-              body: JSON.stringify({ values: [[ newNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, newBase+".pdf" ]] }) }
-          );
-          estNo=newNo; base=newBase;
-        }
-      }catch(e){ console.warn('重複チェック:', e.message); }
+      let estNo, base;
+      if(revision){
+        // ===== 改訂版（子番号）：親番号-枝番 =====
+        const cur=txt('estNo'); const pm=cur.match(/^(\d{8}-\d{3})/); const parent=pm?pm[1]:cur;
+        let maxR=0;
+        try{
+          const rows=await graph(T);
+          const re=new RegExp('^'+parent.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'-(\\d+)$');
+          rows.value.forEach(r=>{ const v=r.values&&r.values[0]&&r.values[0][0]; const m=v!=null&&String(v).match(re); if(m) maxR=Math.max(maxR,parseInt(m[1],10)); });
+        }catch(_){}
+        estNo=`${parent}-${maxR+1}`;
+        base=sanitize(`${estNo}_${client}_${koji}`)||sanitize(estNo)||"見積";
+        await graph(T,{ method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, base+".pdf", '' ]] }) });
+      } else {
+        // ===== 新規採番（同時保存の重複対策つき）=====
+        estNo = await nextEstNo(ledDir, ledFile);
+        base  = sanitize(`${estNo}_${client}_${koji}`) || sanitize(estNo) || "見積";
+        const addResp = await graph(T,{ method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ values: [[ estNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, base+".pdf", '' ]] }) });
+        try{
+          const rows = await graph(T);
+          const nums = rows.value.map(r=> (r.values&&r.values[0]&&r.values[0][0]!=null)? String(r.values[0][0]).trim():'');
+          if(nums.filter(n=>n===estNo).length>1 && addResp.index!=null){
+            let max=0; const re=new RegExp('^'+ymd+'-(\\d+)$');
+            nums.forEach(n=>{ const m=n.match(re); if(m) max=Math.max(max,parseInt(m[1],10)); });
+            const newNo=`${ymd}-${('00'+(max+1)).slice(-3)}`;
+            const newBase=sanitize(`${newNo}_${client}_${koji}`)||sanitize(newNo)||"見積";
+            await graph(`${T}/itemAt(index=${addResp.index})`,{ method:"PATCH", headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify({ values: [[ newNo, issue, client, dept, koji, totalNum, tantou, office, author, stamp, newBase+".pdf", '' ]] }) });
+            estNo=newNo; base=newBase;
+          }
+        }catch(e){ console.warn('重複チェック:', e.message); }
+      }
       document.getElementById('estNo').textContent = estNo;
 
       // ===== PDF を保存（見積フォルダ直下）=====
@@ -414,7 +434,7 @@
       );
 
       savedThisDoc = true;
-      alert(`保存しました（見積№ ${estNo}）。\n・見積フォルダ：${base}.pdf\n・台帳に1行追記（作成者：${author}／${stamp}）`);
+      alert(`${revision?'改訂版として':''}保存しました（見積№ ${estNo}）。\n・見積フォルダ：${base}.pdf\n・台帳に1行追記（作成者：${author}／${stamp}）`);
       return true;
     }catch(e){
       alert("保存に失敗しました：\n" + e.message);
@@ -476,7 +496,7 @@
   }
   // 台帳の3テーブルが無ければ自動作成（見積/納品書/請求書）
   const LEDGER_DEFS = {
-    '見積':   ['見積No','発行日','客先名','部署名','工事名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名'],
+    '見積':   ['見積No','発行日','客先名','部署名','工事名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名','状態'],
     '納品書': ['納品書No','見積No','発行日','客先名','件名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名'],
     '請求書': ['請求書No','見積No','発行日','客先名','件名','税抜合計','消費税','御請求額','担当','事業所','作成者','保存日時','ファイル名']
   };
@@ -487,7 +507,12 @@
     const wb=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook`;
     const allTables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
     const missing=Object.keys(LEDGER_DEFS).filter(s=>!allTables.includes(s));
-    if(!missing.length){ _ledgerReady=true; return; }
+    // 既存の見積テーブルに「状態」列が無ければ追加対象
+    let needStateCol=false;
+    if(allTables.includes('見積')){
+      try{ const cols=(await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns?$select=name`)).value.map(c=>c.name); needStateCol=!cols.includes('状態'); }catch(_){}
+    }
+    if(!missing.length && !needStateCol){ _ledgerReady=true; return; }
     // 作成が必要 → ワークブックセッションで高速化（504タイムアウト回避）
     let sid=''; try{ sid=(await graph(`${wb}/createSession`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({persistChanges:true})})).id; }catch(_){}
     const H=sid?{'workbook-session-id':sid}:{};
@@ -508,6 +533,9 @@
           {method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({address:`A1:${last}1`,hasHeaders:true})});
         await graph(`${wb}/tables/${t.id}`,{method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:sheet})});
       }
+    }
+    if(needStateCol){
+      try{ await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns`,{method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:'状態'})}); }catch(e){ console.warn('状態列追加:', e.message); }
     }
     _ledgerReady=true;
   }
@@ -897,6 +925,48 @@
 
   function togglePersonalSeal(){
     document.getElementById('dateStamp').style.display = document.getElementById('personalSealChk').checked ? 'flex' : 'none';
+  }
+
+  // ===== 受注状況（受注/失注/検討中）=====
+  let _stateDrive='', _stateFileId='', _stateIState=-1;
+  async function openStatus(){
+    const p=document.getElementById('statusPanel');
+    if(p.style.display==='block'){ p.style.display='none'; return; }
+    p.style.display='block';
+    const list=document.getElementById('statusList'); list.textContent='読み込み中…';
+    try{
+      if(!account){ await signIn(); if(!account){ list.textContent='ログインが必要です'; return; } }
+      const ledDir=await resolveShare(CONFIG.shareLedgerUrl);
+      const ledFile=await getLedgerFile(ledDir); await ensureLedger(ledDir, ledFile);
+      _stateDrive=ledDir.driveId; _stateFileId=ledFile.id;
+      const Tt=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}`;
+      const cols=(await graph(`${Tt}/columns?$select=name`)).value.map(c=>c.name);
+      const iNo=cols.indexOf('見積No'), iCl=cols.indexOf('客先名'), iKj=cols.indexOf('工事名'), iTo=cols.indexOf('金額(税抜)'); _stateIState=cols.indexOf('状態');
+      const rows=(await graph(`${Tt}/rows`)).value;
+      if(!rows.length){ list.textContent='見積がまだありません。'; return; }
+      list.innerHTML='';
+      rows.slice().reverse().forEach((r)=>{
+        const idx=rows.indexOf(r); const v=r.values[0];
+        const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:8px;border-bottom:1px solid #eee;padding:4px 0;';
+        const info=document.createElement('span'); info.style.cssText='flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        info.textContent=`${v[iNo]||''}　${v[iCl]||''}　${v[iKj]||''}　¥${Number(v[iTo]||0).toLocaleString('ja-JP')}`;
+        const sel=document.createElement('select'); sel.style.cssText='font-size:12px;';
+        ['','検討中','受注','失注'].forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s||'（未設定）'; if((v[_stateIState]||'')===s) o.selected=true; sel.appendChild(o); });
+        sel.style.background = (v[_stateIState]==='受注')?'#d6f5d6':((v[_stateIState]==='失注')?'#f7d9d9':'');
+        sel.onchange=()=>updateStatus(idx, v, sel.value, sel);
+        row.appendChild(info); row.appendChild(sel); list.appendChild(row);
+      });
+    }catch(e){ list.textContent='取得失敗：'+e.message; }
+  }
+  async function updateStatus(index, values, newState, sel){
+    try{
+      sel.disabled=true;
+      const v=values.slice(); if(_stateIState<0){ alert('状態列がありません'); return; } v[_stateIState]=newState;
+      await graph(`/drives/${_stateDrive}/items/${_stateFileId}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}/rows/itemAt(index=${index})`,
+        { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({values:[v]}) });
+      sel.style.background = newState==='受注'?'#d6f5d6':(newState==='失注'?'#f7d9d9':'');
+    }catch(e){ alert('状態更新に失敗：'+e.message); }
+    finally{ sel.disabled=false; }
   }
 
   function resetAll(){ if(confirm('入力内容を消去して新規作成しますか？')){ location.reload(); } }
