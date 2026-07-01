@@ -508,9 +508,9 @@
     const allTables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
     const missing=Object.keys(LEDGER_DEFS).filter(s=>!allTables.includes(s));
     // 既存の見積テーブルに「状態」列が無ければ追加対象
-    let needStateCol=false;
+    let needStateCol=false, _stateIdx=0;
     if(allTables.includes('見積')){
-      try{ const cols=(await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns?$select=name`)).value.map(c=>c.name); needStateCol=!cols.includes('状態'); }catch(_){}
+      try{ const cc=(await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns?$select=name`)).value; _stateIdx=cc.length; needStateCol=!cc.map(c=>c.name).includes('状態'); }catch(_){}
     }
     if(!missing.length && !needStateCol){ _ledgerReady=true; return; }
     // 作成が必要 → ワークブックセッションで高速化（504タイムアウト回避）
@@ -535,7 +535,7 @@
       }
     }
     if(needStateCol){
-      try{ await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns`,{method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:'状態'})}); }catch(e){ console.warn('状態列追加:', e.message); }
+      await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns`,{method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:'状態', index:_stateIdx})});
     }
     _ledgerReady=true;
   }
@@ -942,6 +942,7 @@
       const Tt=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}`;
       const cols=(await graph(`${Tt}/columns?$select=name`)).value.map(c=>c.name);
       const iNo=cols.indexOf('見積No'), iCl=cols.indexOf('客先名'), iKj=cols.indexOf('工事名'), iTo=cols.indexOf('金額(税抜)'); _stateIState=cols.indexOf('状態');
+      if(_stateIState<0){ await graph(`${Tt}/columns`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'状態', index:cols.length})}); _stateIState=cols.length; }
       const rows=(await graph(`${Tt}/rows`)).value;
       if(!rows.length){ list.textContent='見積がまだありません。'; return; }
       list.innerHTML='';
