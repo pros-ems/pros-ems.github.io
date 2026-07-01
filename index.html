@@ -187,7 +187,7 @@
 
 <!-- 受注状況 -->
 <div class="master no-print" id="statusPanel">
-  <h2>受注状況（見積台帳）<button onclick="document.getElementById('statusPanel').style.display='none'" style="float:right;font-size:11px;padding:2px 8px;">✕ 閉じる</button></h2>
+  <h2>受注状況（見積台帳）<button onclick="document.getElementById('statusPanel').style.display='none'" style="float:right;font-size:11px;padding:2px 8px;">✕ 閉じる</button><button onclick="loadStatus()" style="float:right;font-size:11px;padding:2px 8px;margin-right:6px;">🔄 再読込</button></h2>
   <div id="statusList" style="max-height:340px;overflow:auto;font-size:12px;">読み込み中…</div>
   <div class="note">各見積の状態（受注／失注／検討中）を選ぶと台帳の「状態」列に反映されます（全員で共有）。改訂版（子番号）は個別の行として表示されます。</div>
 </div>
@@ -321,6 +321,7 @@
     const token = await getToken();
     const res = await fetch("https://graph.microsoft.com/v1.0" + path, {
       ...opts,
+      cache: "no-store",
       headers: { "Authorization": "Bearer " + token, ...(opts.headers||{}) }
     });
     if(!res.ok){ const t = await res.text(); throw new Error(`Graph ${res.status}: ${t}`); }
@@ -933,6 +934,9 @@
     const p=document.getElementById('statusPanel');
     if(p.style.display==='block'){ p.style.display='none'; return; }
     p.style.display='block';
+    loadStatus();
+  }
+  async function loadStatus(){
     const list=document.getElementById('statusList'); list.textContent='読み込み中…';
     try{
       if(!account){ await signIn(); if(!account){ list.textContent='ログインが必要です'; return; } }
