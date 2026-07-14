@@ -226,7 +226,7 @@
     <span class="g-val">¥<span id="grandTotal">0</span></span>
   </div>
 
-  <div class="koji"><span class="k-lbl">工事名</span><span class="k-val" id="kojiName" contenteditable="true"></span></div>
+  <div class="koji"><span class="k-lbl">件名</span><span class="k-val" id="kojiName" contenteditable="true"></span></div>
 
   <table id="itemsTable">
     <thead><tr>
@@ -497,7 +497,7 @@
   }
   // 台帳の3テーブルが無ければ自動作成（見積/納品書/請求書）
   const LEDGER_DEFS = {
-    '見積':   ['見積No','発行日','客先名','部署名','工事名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名','状態'],
+    '見積':   ['見積No','発行日','客先名','部署名','件名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名','状態'],
     '納品書': ['納品書No','見積No','発行日','客先名','件名','金額(税抜)','担当','事業所','作成者','保存日時','ファイル名'],
     '請求書': ['請求書No','見積No','発行日','客先名','件名','税抜合計','消費税','御請求額','担当','事業所','作成者','保存日時','ファイル名']
   };
@@ -508,12 +508,12 @@
     const wb=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook`;
     const allTables=(await graph(`${wb}/tables?$select=name`)).value.map(t=>t.name);
     const missing=Object.keys(LEDGER_DEFS).filter(s=>!allTables.includes(s));
-    // 既存の見積テーブルに「状態」列が無ければ追加対象
-    let needStateCol=false, _stateIdx=0;
+    // 既存の見積テーブルの「状態」列追加・「工事名→件名」改名の要否
+    let needStateCol=false, _stateIdx=0, needRenameKoji=false;
     if(allTables.includes('見積')){
-      try{ const cc=(await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns?$select=name`)).value; _stateIdx=cc.length; needStateCol=!cc.map(c=>c.name).includes('状態'); }catch(_){}
+      try{ const cc=(await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns?$select=name`)).value; const nm=cc.map(c=>c.name); _stateIdx=cc.length; needStateCol=!nm.includes('状態'); needRenameKoji=nm.includes('工事名')&&!nm.includes('件名'); }catch(_){}
     }
-    if(!missing.length && !needStateCol){ _ledgerReady=true; return; }
+    if(!missing.length && !needStateCol && !needRenameKoji){ _ledgerReady=true; return; }
     // 作成が必要 → ワークブックセッションで高速化（504タイムアウト回避）
     let sid=''; try{ sid=(await graph(`${wb}/createSession`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({persistChanges:true})})).id; }catch(_){}
     const H=sid?{'workbook-session-id':sid}:{};
@@ -534,6 +534,9 @@
           {method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({address:`A1:${last}1`,hasHeaders:true})});
         await graph(`${wb}/tables/${t.id}`,{method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:sheet})});
       }
+    }
+    if(needRenameKoji){
+      await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns/${encodeURIComponent('工事名')}`,{method:'PATCH',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:'件名'})});
     }
     if(needStateCol){
       await graph(`${wb}/tables/${encodeURIComponent('見積')}/columns`,{method:'POST',headers:{'Content-Type':'application/json',...H},body:JSON.stringify({name:'状態', index:_stateIdx})});
@@ -945,7 +948,7 @@
       _stateDrive=ledDir.driveId; _stateFileId=ledFile.id;
       const Tt=`/drives/${ledDir.driveId}/items/${ledFile.id}/workbook/tables/${encodeURIComponent(CONFIG.tableName)}`;
       const cols=(await graph(`${Tt}/columns?$select=name`)).value.map(c=>c.name);
-      const iNo=cols.indexOf('見積No'), iCl=cols.indexOf('客先名'), iKj=cols.indexOf('工事名'), iTo=cols.indexOf('金額(税抜)'); _stateIState=cols.indexOf('状態');
+      const iNo=cols.indexOf('見積No'), iCl=cols.indexOf('客先名'), iKj=(cols.indexOf('件名')>=0?cols.indexOf('件名'):cols.indexOf('工事名')), iTo=cols.indexOf('金額(税抜)'); _stateIState=cols.indexOf('状態');
       if(_stateIState<0){ await graph(`${Tt}/columns`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'状態', index:cols.length})}); _stateIState=cols.length; }
       const rows=(await graph(`${Tt}/rows`)).value;
       if(!rows.length){ list.textContent='見積がまだありません。'; return; }
